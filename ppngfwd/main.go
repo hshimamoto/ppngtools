@@ -12,6 +12,8 @@ import (
     "strconv"
     "strings"
     "time"
+
+    "github.com/hshimamoto/go-session"
 )
 
 type FwdConn interface {
@@ -181,23 +183,18 @@ func (fwd *FwdTCP)Type() string {
 
 func (fwd *FwdTCP)Open() {
     if fwd.src != "" {
-	addr, err := net.ResolveTCPAddr("tcp", fwd.src)
+	done := make(chan bool)
+	s, err := session.NewServer(fwd.src, func(conn net.Conn) {
+	    fwd.conn = conn
+	    done <- true
+	});
 	if err != nil {
-	    log.Printf("FwdTCP: resolve failed %s\n", err)
+	    log.Printf("FwdTCP: NewServer failed %s\n", err)
 	    os.Exit(1)
 	}
-	l, err := net.ListenTCP("tcp", addr)
-	if err != nil {
-	    log.Printf("FwdTCP: listen failed %s\n", err)
-	    os.Exit(1)
-	}
-	conn, err := l.AcceptTCP()
-	if err != nil {
-	    log.Printf("FwdTCP: accept failed %s\n", err)
-	    os.Exit(1)
-	}
+	go s.Run()
+	<-done
 	log.Printf("FwdTCP: connected from %s\n", fwd.src)
-	fwd.conn = conn
     } else {
 	conn, err := net.Dial("tcp", fwd.dst)
 	if err != nil {
