@@ -4,6 +4,7 @@
 package main
 
 import (
+    "crypto/sha1"
     "fmt"
     "log"
     "net"
@@ -26,6 +27,8 @@ type FwdConn interface {
 type FwdHTTP struct {
     src, dst string
     url *url.URL
+    key [20]byte
+    kin, kout int
     cin, cout chan []byte
 }
 
@@ -93,7 +96,12 @@ func (fwd *FwdHTTP)get(path string) {
 		buf := make([]byte, n)
 		r, _ := conn.Read(buf)
 		log.Printf("get read %d/%d\n", r, n)
-		fwd.cin <- buf[:r]
+		xbuf := buf[:r]
+		for i := 0; i < r; i++ {
+		    xbuf[i] = xbuf[i] ^ fwd.key[fwd.kin]
+		    fwd.kin = (fwd.kin + 1) % 20
+		}
+		fwd.cin <- xbuf
 		n -= r
 	    }
 	    crlf := make([]byte, 2)
@@ -126,10 +134,15 @@ func (fwd *FwdHTTP)put(path string) {
 		break
 	    }
 	    n := len(buf)
+	    xbuf := make([]byte, n)
+	    for i := 0; i < n; i++ {
+		xbuf[i] = buf[i] ^ fwd.key[fwd.kout]
+		fwd.kout = (fwd.kout + 1) % 20
+	    }
 	    log.Printf("put chunk %d bytes (%x)\n", n, n)
 	    chunk := fmt.Sprintf("%x\r\n", n)
 	    conn.Write([]byte(chunk))
-	    conn.Write(buf)
+	    conn.Write(xbuf)
 	    conn.Write([]byte("\r\n"))
 	}
     }()
@@ -141,6 +154,7 @@ func (fwd *FwdHTTP)Type() string {
 
 func (fwd *FwdHTTP)Open() {
     var in, out string
+    var u string
 
     if fwd.src != "" {
 	url, err := url.Parse(fwd.src)
@@ -150,6 +164,7 @@ func (fwd *FwdHTTP)Open() {
 	fwd.url = url
 	in = "/0"
 	out = "/1"
+	u = fwd.src
     } else {
 	url, err := url.Parse(fwd.dst)
 	if err != nil {
@@ -158,7 +173,16 @@ func (fwd *FwdHTTP)Open() {
 	fwd.url = url
 	in = "/1"
 	out = "/0"
+	u = fwd.dst
     }
+    // generate key
+    key := sha1.Sum([]byte(u))
+    for i := 0; i < 20; i++ {
+	fwd.key[i] = key[i]
+    }
+    log.Printf("FwdHTTP: key %x\n", key)
+    fwd.kin = 0
+    fwd.kout = 0
     // start PUT
     fwd.put(out)
     // start GET
