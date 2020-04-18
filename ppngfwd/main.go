@@ -113,6 +113,10 @@ func (fwd *FwdHTTP)put(path string) {
 	    for {
 		buf := make([]byte, 4096)
 		n, _ := conn.Read(buf)
+		if n == 0 {
+		    log.Printf("close\n")
+		    break
+		}
 		log.Printf("discard %d bytes\n", n)
 	    }
 	}()
